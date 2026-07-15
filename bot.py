@@ -13,7 +13,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 load_dotenv()
 
-from anki_client import AnkiConnectError, add_vocab_note, ensure_deck_and_model_exist
+from anki_client import AnkiConnectError, add_vocab_note, ensure_deck_and_model_exist, find_mp3_for_word
 from ai_client import AIExplainError, explain_word
 
 logging.basicConfig(
@@ -37,8 +37,8 @@ def _is_allowed(user_id: int) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Gửi cho tôi 1 từ tiếng Anh, tôi sẽ giải nghĩa bằng AI và tự tạo "
-        "thẻ Anki cho bạn (nhớ mở sẵn Anki trên máy nhé)."
+        "Gửi cho tôi 1 từ tiếng Anh, tôi sẽ giải nghĩa bằng AI, lấy MP3 từ "
+        "Cambridge nếu có, rồi tự tạo thẻ Anki cho bạn (nhớ mở sẵn Anki trên máy nhé)."
     )
 
 
@@ -54,6 +54,8 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text(f"Đang tra '{word}'...")
 
+    audio_media = find_mp3_for_word(word)
+
     try:
         data = explain_word(word)
     except AIExplainError as e:
@@ -61,17 +63,23 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        add_vocab_note(data)
+        add_vocab_note(data, audio_media=audio_media)
     except AnkiConnectError as e:
         await status_msg.edit_text(f"Lấy nghĩa xong nhưng lỗi khi thêm vào Anki: {e}")
         return
 
+    audio_line = (
+        f"\n🔊 Đã đính kèm MP3 Cambridge: {audio_media['filename']}"
+        if audio_media is not None
+        else "\n🔇 Không tìm thấy MP3 Cambridge phù hợp"
+    )
     reply = (
         f"✅ Đã thêm thẻ: {data['word']} {data['phonetic']} ({data['part_of_speech']})\n"
         f"🇻🇳 {data['meaning_vi']}\n"
         f"🇬🇧 {data['meaning_en']}\n"
         f"📝 {data['example_en']}\n"
         f"   {data['example_vi']}"
+        f"{audio_line}"
     )
     await status_msg.edit_text(reply)
 

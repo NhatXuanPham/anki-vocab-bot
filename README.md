@@ -1,8 +1,8 @@
 # Anki Vocab Bot (Telegram + Groq + AnkiConnect)
 
-Bot Telegram: bạn gửi 1 từ tiếng Anh → bot gọi Groq API giải nghĩa →
-tự động tạo thẻ trong Anki (qua addon AnkiConnect, cần Anki đang mở trên
-cùng máy chạy bot).
+Bot Telegram: bạn gửi 1 từ tiếng Anh → bot gọi Groq API giải nghĩa,
+lấy MP3 từ trang Cambridge nếu có → tự động tạo thẻ trong Anki (qua addon
+AnkiConnect, cần Anki đang mở trên cùng máy chạy bot).
 
 ## 1. Chuẩn bị
 
@@ -43,13 +43,16 @@ cp .env.example .env
 
 Bot sẽ tự tạo deck (`Vocab AI` theo mặc định) và note type (`Vocab (AI)`)
 trong Anki nếu chưa có, với các field: Word, Phonetic, PartOfSpeech,
-MeaningVi, MeaningEn, ExampleEn, ExampleVi.
+MeaningVi, MeaningEn, ExampleEn, ExampleVi, Audio.
 
 ## 4. Tuỳ chỉnh
 
 - **Đổi tên deck/note type**: sửa `ANKI_DECK_NAME`, `ANKI_MODEL_NAME` trong `.env`.
 - **Đổi model Groq**: sửa `GROQ_MODEL` trong `.env` (ví dụ
   `llama-3.3-70b-versatile`).
+- **Audio Cambridge**: bot sẽ tự mở trang
+  `https://dictionary.cambridge.org/vi/dictionary/english/<tu-vung>` để lấy
+  file `.mp3` phát âm và đính kèm vào field `Audio` trong Anki.
 - **Giới hạn ai được dùng bot**: điền Telegram user ID (không phải username)
   vào `ALLOWED_TELEGRAM_USER_IDS` trong `.env`, cách nhau dấu phẩy. Lấy user
   ID bằng cách chat với bot @userinfobot.
