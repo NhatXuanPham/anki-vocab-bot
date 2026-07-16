@@ -43,16 +43,23 @@ cp .env.example .env
 
 Bot sẽ tự tạo deck (`Vocab AI` theo mặc định) và note type (`Vocab (AI)`)
 trong Anki nếu chưa có, với các field: Word, Phonetic, PartOfSpeech,
-MeaningVi, MeaningEn, ExampleEn, ExampleVi, Audio.
+MeaningVi, MeaningEn, ExampleEn, ExampleVi, Audio. Field `Word` sẽ tự
+gộp luôn base word khi có, nên không cần field riêng cho BaseWord.
 
 ## 4. Tuỳ chỉnh
 
 - **Đổi tên deck/note type**: sửa `ANKI_DECK_NAME`, `ANKI_MODEL_NAME` trong `.env`.
 - **Đổi model Groq**: sửa `GROQ_MODEL` trong `.env` (ví dụ
   `llama-3.3-70b-versatile`).
+- **Schema tối giản**: bot luôn lưu nguyên từ người dùng nhập ở field `Word`,
+  và nếu có base word thì nó được gộp ngay trong field `Word` luôn. Các field
+  khác giữ như đề xuất của bạn: `Phonetic`, `PartOfSpeech`, `MeaningVi`,
+  `MeaningEn`, `ExampleEn`, `ExampleVi`, `Audio`.
 - **Audio Cambridge**: bot sẽ tự mở trang
   `https://dictionary.cambridge.org/vi/dictionary/english/<tu-vung>` để lấy
-  file `.mp3` phát âm và đính kèm vào field `Audio` trong Anki.
+  file `.mp3` phát âm và đính kèm vào field `Audio` trong Anki. Khi từ là dạng
+  biến đổi, bot sẽ ưu tiên tra audio theo `BaseWord` nhưng vẫn giữ `Word`
+  gốc người dùng đã gửi.
 - **Giới hạn ai được dùng bot**: điền Telegram user ID (không phải username)
   vào `ALLOWED_TELEGRAM_USER_IDS` trong `.env`, cách nhau dấu phẩy. Lấy user
   ID bằng cách chat với bot @userinfobot.

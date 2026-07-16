@@ -54,13 +54,13 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text(f"Đang tra '{word}'...")
 
-    audio_media = find_mp3_for_word(word)
-
     try:
         data = explain_word(word)
     except AIExplainError as e:
         await status_msg.edit_text(f"Lỗi khi giải nghĩa: {e}")
         return
+
+    audio_media = find_mp3_for_word(word, data.get("base_word"))
 
     try:
         add_vocab_note(data, audio_media=audio_media)
@@ -73,8 +73,14 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if audio_media is not None
         else "\n🔇 Không tìm thấy MP3 Cambridge phù hợp"
     )
+    base_word_line = ""
+    base_word = (data.get("base_word") or "").strip()
+    if base_word and base_word.casefold() != data["word"].strip().casefold():
+        base_word_line = f"Base word: {base_word}\n"
+
     reply = (
         f"✅ Đã thêm thẻ: {data['word']} {data['phonetic']} ({data['part_of_speech']})\n"
+        f"{base_word_line}"
         f"🇻🇳 {data['meaning_vi']}\n"
         f"🇬🇧 {data['meaning_en']}\n"
         f"📝 {data['example_en']}\n"

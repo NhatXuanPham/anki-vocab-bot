@@ -3,6 +3,7 @@ Giao tiếp với Anki qua addon AnkiConnect (https://ankiweb.net/shared/info/20
 Yêu cầu: Anki phải đang MỞ trên máy này, và đã cài addon AnkiConnect.
 """
 import base64
+import html
 import os
 import re
 from urllib.parse import quote, urljoin
@@ -25,18 +26,19 @@ FIELDS = [
 ]
 
 FRONT_TEMPLATE = """
-<div style="font-size:28px; text-align:center;">{{Word}}</div>
-<div style="text-align:center; color:#666;">{{Phonetic}} &nbsp; <i>{{PartOfSpeech}}</i></div>
-<div style="text-align:center; margin-top:8px;">{{Audio}}</div>
+<div style="font-size:30px; text-align:center; font-weight:600;">{{Word}}</div>
+<div style="text-align:center; color:#666; margin-top:10px; font-size:18px;">{{Phonetic}}</div>
+<div style="text-align:center; color:#444; margin-top:6px;"><i>{{PartOfSpeech}}</i></div>
+<div style="text-align:center; margin-top:14px;">{{Audio}}</div>
 """
 
 BACK_TEMPLATE = """
 {{FrontSide}}
 <hr id="answer">
 <div style="font-size:20px;"><b>{{MeaningVi}}</b></div>
-<div style="color:#666; margin-top:4px;">{{MeaningEn}}</div>
-<div style="margin-top:12px;">{{ExampleEn}}</div>
-<div style="color:#666;">{{ExampleVi}}</div>
+<div style="color:#666; margin-top:6px;">{{MeaningEn}}</div>
+<div style="margin-top:12px;"><b>Example:</b><br>{{ExampleEn}}</div>
+<div style="color:#666; margin-top:6px;">{{ExampleVi}}</div>
 """
 
 CSS = """
@@ -51,6 +53,20 @@ CSS = """
 
 class AnkiConnectError(Exception):
     pass
+
+
+def _format_word_field(word: str, base_word: str | None) -> str:
+    clean_word = html.escape((word or "").strip())
+    clean_base_word = html.escape((base_word or "").strip())
+
+    if clean_base_word and clean_base_word.casefold() != clean_word.casefold():
+        return (
+            f"<div style=\"font-size:30px; text-align:center; font-weight:600;\">{clean_word}</div>"
+            f"<div style=\"text-align:center; color:#777; margin-top:6px; font-size:16px;\">"
+            f"Base word: {clean_base_word}</div>"
+        )
+
+    return f"<div style=\"font-size:30px; text-align:center; font-weight:600;\">{clean_word}</div>"
 
 
 def _normalize_key(text: str) -> str:
@@ -76,8 +92,7 @@ def _extract_cambridge_mp3_url(page_html: str) -> str | None:
     return None
 
 
-def find_mp3_for_word(word: str) -> dict | None:
-    """Lấy mp3 pronunciation từ trang Cambridge của từ cần tra."""
+def _fetch_cambridge_mp3(word: str) -> dict | None:
     page_url = _cambridge_word_url(word)
     try:
         response = requests.get(
@@ -107,6 +122,24 @@ def find_mp3_for_word(word: str) -> dict | None:
         "filename": os.path.basename(audio_url),
         "data": base64.b64encode(audio_response.content).decode("ascii"),
     }
+
+
+def find_mp3_for_word(word: str, base_word: str | None = None) -> dict | None:
+    """Lấy mp3 pronunciation từ trang Cambridge, ưu tiên từ người dùng nhập."""
+    candidates = [word, base_word]
+    seen = set()
+
+    for candidate in candidates:
+        candidate = (candidate or "").strip()
+        if not candidate or candidate.casefold() in seen:
+            continue
+        seen.add(candidate.casefold())
+
+        audio_media = _fetch_cambridge_mp3(candidate)
+        if audio_media is not None:
+            return audio_media
+
+    return None
 
 
 def _invoke(action: str, **params):
@@ -159,20 +192,25 @@ def ensure_deck_and_model_exist():
             index=len(field_names),
         )
 
+    field_names = _invoke("modelFieldNames", modelName=ANKI_MODEL_NAME)
+    if "BaseWord" in field_names:
+        _invoke(
+            "modelFieldRemove",
+            modelName=ANKI_MODEL_NAME,
+            fieldName="BaseWord",
+        )
+
     templates = _invoke("modelTemplates", modelName=ANKI_MODEL_NAME)
     for template_name, template in templates.items():
-        front = template.get("Front", "")
-        if "{{Audio}}" not in front:
-            updated_front = front.rstrip() + "\n<div style=\"text-align:center; margin-top:8px;\">{{Audio}}</div>"
-            _invoke(
-                "modelTemplateAdd",
-                modelName=ANKI_MODEL_NAME,
-                template={
-                    "Name": template_name,
-                    "Front": updated_front,
-                    "Back": template.get("Back", ""),
-                },
-            )
+        _invoke(
+            "modelTemplateAdd",
+            modelName=ANKI_MODEL_NAME,
+            template={
+                "Name": template_name,
+                "Front": FRONT_TEMPLATE,
+                "Back": BACK_TEMPLATE,
+            },
+        )
 
 
 def add_vocab_note(data: dict, tags=None, audio_media: dict | None = None) -> int:
@@ -184,7 +222,7 @@ def add_vocab_note(data: dict, tags=None, audio_media: dict | None = None) -> in
         "deckName": ANKI_DECK_NAME,
         "modelName": ANKI_MODEL_NAME,
         "fields": {
-            "Word": data["word"],
+            "Word": _format_word_field(data["word"], data.get("base_word")),
             "Phonetic": data["phonetic"],
             "PartOfSpeech": data["part_of_speech"],
             "MeaningVi": data["meaning_vi"],
