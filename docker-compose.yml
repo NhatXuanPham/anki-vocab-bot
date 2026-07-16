@@ -1,0 +1,8 @@
+services:
+  telegram-anki-bot:
+    build: .
+    container_name: telegram-anki-bot
+    restart: unless-stopped
+
+    env_file:
+      - .env
