@@ -73,6 +73,10 @@ def _normalize_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", text.casefold())
 
 
+def _normalize_match_key(text: str) -> str:
+    return _normalize_key(_extract_plain_text(text))
+
+
 def _extract_plain_text(value: str | None) -> str:
     if not value:
         return ""
@@ -90,20 +94,32 @@ def _note_field_value(note: dict, field_name: str) -> str:
     return ""
 
 
+def _iter_deck_notes() -> list[dict]:
+    note_ids = _invoke("findNotes", query=f'deck:"{ANKI_DECK_NAME}"')
+    if not note_ids:
+        return []
+    return _invoke("notesInfo", notes=note_ids)
+
+
 def word_exists_in_deck(word: str, base_word: str | None = None) -> bool:
     """Kiểm tra từ đã tồn tại trong deck Anki chưa."""
     candidates = [word, base_word]
     seen = set()
+    normalized_candidates = []
 
     for candidate in candidates:
         candidate = (candidate or "").strip()
         if not candidate or candidate.casefold() in seen:
             continue
         seen.add(candidate.casefold())
+        normalized_candidates.append(_normalize_match_key(candidate))
 
-        query = f'deck:"{ANKI_DECK_NAME}" "{candidate}"'
-        note_ids = _invoke("findNotes", query=query)
-        if note_ids:
+    if not normalized_candidates:
+        return False
+
+    for note in _iter_deck_notes():
+        note_word = _normalize_match_key(_note_field_value(note, "Word"))
+        if note_word in normalized_candidates:
             return True
 
     return False
@@ -113,23 +129,23 @@ def get_existing_vocab_data(word: str, base_word: str | None = None) -> dict | N
     """Lấy dữ liệu thẻ đã tồn tại từ Anki để hiển thị lại cho người dùng."""
     candidates = [word, base_word]
     seen = set()
+    normalized_candidates = []
 
     for candidate in candidates:
         candidate = (candidate or "").strip()
         if not candidate or candidate.casefold() in seen:
             continue
         seen.add(candidate.casefold())
+        normalized_candidates.append(_normalize_match_key(candidate))
 
-        query = f'deck:"{ANKI_DECK_NAME}" "{candidate}"'
-        note_ids = _invoke("findNotes", query=query)
-        if not note_ids:
+    if not normalized_candidates:
+        return None
+
+    for note in _iter_deck_notes():
+        note_word = _normalize_match_key(_note_field_value(note, "Word"))
+        if note_word not in normalized_candidates:
             continue
 
-        notes = _invoke("notesInfo", notes=note_ids[:1])
-        if not notes:
-            continue
-
-        note = notes[0]
         plain_word = _extract_plain_text(_note_field_value(note, "Word"))
         base_word_value = None
         base_match = re.search(r"Base word:\s*(.+)", plain_word)
@@ -139,8 +155,8 @@ def get_existing_vocab_data(word: str, base_word: str | None = None) -> dict | N
             base_word_value = plain_word
 
         return {
-            "word": plain_word or candidate,
-            "base_word": base_word_value or candidate,
+            "word": plain_word or word,
+            "base_word": base_word_value or (base_word or word),
             "phonetic": _note_field_value(note, "Phonetic"),
             "part_of_speech": _note_field_value(note, "PartOfSpeech"),
             "meaning_vi": _note_field_value(note, "MeaningVi"),
