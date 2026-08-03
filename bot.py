@@ -13,7 +13,13 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 load_dotenv()
 
-from anki_client import AnkiConnectError, add_vocab_note, ensure_deck_and_model_exist, find_mp3_for_word
+from anki_client import (
+    AnkiConnectError,
+    add_vocab_note,
+    ensure_deck_and_model_exist,
+    find_mp3_for_word,
+    get_existing_vocab_data,
+)
 from ai_client import AIExplainError, explain_word
 
 logging.basicConfig(
@@ -42,6 +48,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _build_reply(data: dict, audio_media: dict | None = None, title: str = "Đã thêm thẻ") -> str:
+    audio_line = (
+        f"\n🔊 Đã đính kèm MP3 Cambridge: {audio_media['filename']}"
+        if audio_media is not None
+        else "\n🔇 Không tìm thấy MP3 Cambridge phù hợp"
+    )
+    base_word_line = ""
+    base_word = (data.get("base_word") or "").strip()
+    if base_word and base_word.casefold() != data["word"].strip().casefold():
+        base_word_line = f"Base word: {base_word}\n"
+
+    return (
+        f"✅ {title}: {data['word']} {data['phonetic']} ({data['part_of_speech']})\n"
+        f"{base_word_line}"
+        f"🇻🇳 {data['meaning_vi']}\n"
+        f"🇬🇧 {data['meaning_en']}\n"
+        f"📝 {data['example_en']}\n"
+        f"   {data['example_vi']}"
+        f"{audio_line}"
+    )
+
+
 async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not _is_allowed(user_id):
@@ -55,6 +83,13 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text(f"Đang tra '{word}'...")
 
     try:
+        existing_data = get_existing_vocab_data(word)
+        if existing_data is not None:
+            await status_msg.edit_text(
+                _build_reply(existing_data, title="Đã có sẵn trong Anki")
+            )
+            return
+
         data = explain_word(word)
     except AIExplainError as e:
         await status_msg.edit_text(f"Lỗi khi giải nghĩa: {e}")
@@ -68,26 +103,7 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"Lấy nghĩa xong nhưng lỗi khi thêm vào Anki: {e}")
         return
 
-    audio_line = (
-        f"\n🔊 Đã đính kèm MP3 Cambridge: {audio_media['filename']}"
-        if audio_media is not None
-        else "\n🔇 Không tìm thấy MP3 Cambridge phù hợp"
-    )
-    base_word_line = ""
-    base_word = (data.get("base_word") or "").strip()
-    if base_word and base_word.casefold() != data["word"].strip().casefold():
-        base_word_line = f"Base word: {base_word}\n"
-
-    reply = (
-        f"✅ Đã thêm thẻ: {data['word']} {data['phonetic']} ({data['part_of_speech']})\n"
-        f"{base_word_line}"
-        f"🇻🇳 {data['meaning_vi']}\n"
-        f"🇬🇧 {data['meaning_en']}\n"
-        f"📝 {data['example_en']}\n"
-        f"   {data['example_vi']}"
-        f"{audio_line}"
-    )
-    await status_msg.edit_text(reply)
+    await status_msg.edit_text(_build_reply(data, audio_media=audio_media, title="Đã thêm thẻ"))
 
 
 def main():
