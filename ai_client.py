@@ -11,6 +11,47 @@ import requests
 
 load_dotenv()
 
+# Provider configuration
+PROVIDERS = {
+    "groq": {
+        "api_key": os.getenv("GROQ_API_KEY"),
+        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "api_url": "https://api.groq.com/openai/v1/chat/completions",
+    },
+    "gemini": {
+        "api_key": os.getenv("GEMINI_API_KEY"),
+        "model": os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest"),
+        # Chrome uses API key in query param and expects model in URL
+        "api_url_template": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+    },
+    "cohere": {
+        "api_key": os.getenv("COHERE_API_KEY"),
+        "model": os.getenv("COHERE_MODEL", "command-r-plus"),
+        "api_url": "https://api.cohere.com/v1/chat",
+    },
+    "litellm": {
+        "api_key": os.getenv("LITELLM_API_KEY") or None,  # optional master key
+        "model": os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
+        "api_url": os.getenv(
+            "LITELLM_API_URL",
+            "http://localhost:4000/v1/chat/completions",
+        ),
+    },
+}
+# Get AI provider from environment
+AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
+
+# Validate provider
+AVAILABLE_PROVIDERS = list(PROVIDERS.keys())
+if AI_PROVIDER not in AVAILABLE_PROVIDERS:
+    raise ValueError(
+        f"Invalid AI_PROVIDER: {AI_PROVIDER}. "
+        f"Available providers: {', '.join(AVAILABLE_PROVIDERS)}"
+    )
+
+# Get current provider config
+CURRENT_PROVIDER = PROVIDERS[AI_PROVIDER]
+
 _IRREGULAR_LEMMAS = {
     "went": "go",
     "gone": "go",
@@ -26,6 +67,45 @@ _IRREGULAR_LEMMAS = {
     "mice": "mouse",
     "geese": "goose",
 }
+
+
+def _normalize_litellm_url(url: str) -> str:
+    """Accept base, /v1, or full chat path; always return chat completions URL."""
+    normalized = (url or "").strip().rstrip("/")
+    if not normalized:
+        return "http://localhost:4000/v1/chat/completions"
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    if normalized.endswith("/v1"):
+        return f"{normalized}/chat/completions"
+    return f"{normalized}/v1/chat/completions"
+
+
+def _reload_provider_config(provider_name: str) -> dict:
+    """Rebuild provider settings from current env (useful after .env edits)."""
+    if provider_name == "litellm":
+        return {
+            "api_key": os.getenv("LITELLM_API_KEY") or None,
+            "model": os.getenv("LITELLM_MODEL", "gpt-4o-mini"),
+            "api_url": _normalize_litellm_url(
+                os.getenv(
+                    "LITELLM_API_URL",
+                    "http://localhost:4000/v1/chat/completions",
+                )
+            ),
+        }
+
+    config = dict(PROVIDERS[provider_name])
+    if provider_name == "groq":
+        config["api_key"] = os.getenv("GROQ_API_KEY")
+        config["model"] = os.getenv("GROQ_MODEL", config["model"])
+    elif provider_name == "gemini":
+        config["api_key"] = os.getenv("GEMINI_API_KEY")
+        config["model"] = os.getenv("GEMINI_MODEL", config["model"])
+    elif provider_name == "cohere":
+        config["api_key"] = os.getenv("COHERE_API_KEY")
+        config["model"] = os.getenv("COHERE_MODEL", config["model"])
+    return config
 
 
 def _lemmatize(word: str) -> str:
@@ -57,10 +137,6 @@ def _lemmatize(word: str) -> str:
 
     return raw
 
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", os.getenv("GEMINI_MODEL", "llama-3.3-70b-versatile"))
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 PROMPT_TEMPLATE = """Bạn là trợ lý từ điển. Hãy giải nghĩa từ vựng tiếng Anh sau
 và trả về DUY NHẤT một JSON object hợp lệ, không thêm text nào khác,
@@ -102,71 +178,144 @@ def _extract_json(text: str) -> dict:
     return json.loads(text)
 
 
-def _extract_response_text(response_json: dict) -> str:
+def _extract_response_text(response_json: dict, provider: str) -> str:
+    """Extract text response from different provider formats."""
     try:
-        content = response_json["choices"][0]["message"]["content"]
+        if provider == "groq":
+            content = response_json["choices"][0]["message"]["content"]
+        elif provider == "gemini":
+            # Gemini response format: candidates -> output
+            candidates = response_json.get("candidates", [])
+            if candidates:
+                # Each candidate has 'output' field containing the generated text
+                content = candidates[0].get("output", "")
+            else:
+                content = ""
+        elif provider == "cohere":
+            # Cohere response format: 'text' field in the top-level response
+            content = response_json.get("text", "")
+        elif provider == "litellm":
+            # LiteLLM uses OpenAI-compatible format
+            content = response_json["choices"][0]["message"]["content"]
+        else:
+            content = response_json.get("content", "")
+            
+        if isinstance(content, str):
+            if not content.strip():
+                raise AIExplainError(f"{provider.capitalize()} không trả về text: {response_json!r}")
+            return content
+
+        if isinstance(content, list):
+            texts = []
+            for part in content:
+                text = part.get("text") if isinstance(part, dict) else None
+                if text:
+                    texts.append(text)
+            if texts:
+                return "".join(texts)
+
+        raise AIExplainError(f"{provider.capitalize()} không trả về text: {response_json!r}")
     except (KeyError, IndexError, TypeError) as e:
-        raise AIExplainError(f"Groq trả về cấu trúc không hợp lệ: {response_json!r}") from e
-
-    if isinstance(content, str):
-        if not content.strip():
-            raise AIExplainError(f"Groq không trả về text: {response_json!r}")
-        return content
-
-    if isinstance(content, list):
-        texts = []
-        for part in content:
-            text = part.get("text") if isinstance(part, dict) else None
-            if text:
-                texts.append(text)
-        if texts:
-            return "".join(texts)
-
-    raise AIExplainError(f"Groq không trả về text: {response_json!r}")
+        raise AIExplainError(f"{provider.capitalize()} trả về cấu trúc không hợp lệ: {response_json!r}") from e
 
 
 def explain_word(word: str) -> dict:
-    """Gọi Groq để lấy nghĩa của `word`, trả về dict theo schema ở trên."""
-    global GROQ_API_KEY, GROQ_MODEL
-    if not GROQ_API_KEY:
-        load_dotenv()
-        GROQ_API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("GEMINI_API_KEY")
-        GROQ_MODEL = os.getenv("GROQ_MODEL", os.getenv("GEMINI_MODEL", "llama-3.3-70b-versatile"))
-
-    if not GROQ_API_KEY:
-        raise AIExplainError("Thiếu GROQ_API_KEY trong file .env")
+    """Gọi AI provider để lấy nghĩa của `word`, trả về dict theo schema ở trên."""
+    global AI_PROVIDER, CURRENT_PROVIDER
+    
+    # Reload environment variables in case they changed
+    load_dotenv(override=True)
+    AI_PROVIDER = os.getenv("AI_PROVIDER", "groq").lower()
+    
+    # Re-validate provider
+    AVAILABLE_PROVIDERS = list(PROVIDERS.keys())
+    if AI_PROVIDER not in AVAILABLE_PROVIDERS:
+        raise AIExplainError(
+            f"Invalid AI_PROVIDER: {AI_PROVIDER}. "
+            f"Available providers: {', '.join(AVAILABLE_PROVIDERS)}"
+        )
+    
+    # Get current provider config
+    CURRENT_PROVIDER = _reload_provider_config(AI_PROVIDER)
+    PROVIDERS[AI_PROVIDER] = CURRENT_PROVIDER
+    provider_name = AI_PROVIDER
+    api_key = CURRENT_PROVIDER["api_key"]
+    model = CURRENT_PROVIDER["model"]
+    api_url = CURRENT_PROVIDER.get("api_url") or CURRENT_PROVIDER.get("api_url_template")
+    
+    if not api_key:
+        if provider_name == "litellm":
+            raise AIExplainError(
+                "Missing LITELLM_API_KEY. LiteLLM proxy requires a virtual key "
+                "(thường bắt đầu bằng 'sk-')."
+            )
+        raise AIExplainError(f"Missing API key for provider: {provider_name}")
 
     original_word = word.strip()
     lemma_word = _lemmatize(original_word)
     prompt = PROMPT_TEMPLATE.format(word=original_word, lemma_word=lemma_word)
+    
     try:
-        response = requests.post(
-            GROQ_API_URL,
-            headers={
+        # Prepare headers and payload based on provider
+        if provider_name == "gemini":
+            headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-            },
-            json={
-                "model": GROQ_MODEL,
+            }
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 2000,
+                }
+            }
+            # Add API key to URL for Gemini
+            if api_key:
+                api_url_with_key = api_url.format(model=model, api_key=api_key)
+            else:
+                api_url_with_key = api_url
+        else:
+            # OpenAI-compatible format (Groq, Cohere, LiteLLM)
+            headers = {
+                "Content-Type": "application/json",
+            }
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            
+            payload = {
+                "model": model,
                 "messages": [
                     {
                         "role": "user",
                         "content": prompt,
                     }
                 ]
-            },
+            }
+            api_url_with_key = api_url
+        
+        response = requests.post(
+            api_url_with_key,
+            headers=headers,
+            json=payload,
             timeout=30,
         )
         response.raise_for_status()
-        raw_text = _extract_response_text(response.json())
+        raw_text = _extract_response_text(response.json(), provider_name)
     except Exception as e:
-        raise AIExplainError(f"Lỗi gọi Groq API: {e}") from e
+        raise AIExplainError(f"Lỗi gọi {provider_name.capitalize()} API: {e}") from e
 
     try:
         data = _extract_json(raw_text)
     except (json.JSONDecodeError, TypeError) as e:
         raise AIExplainError(
-            f"Groq trả về không đúng định dạng JSON: {raw_text!r}"
+            f"{provider_name.capitalize()} trả về không đúng định dạng JSON: {raw_text!r}"
         ) from e
 
     required_fields = [
