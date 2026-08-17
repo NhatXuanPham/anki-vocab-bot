@@ -28,7 +28,7 @@ _IRREGULAR_LEMMAS = {
     "geese": "goose",
 }
 
-def _lemmatize(word: str) -> str:
+def lemmatize(word: str) -> str:
     raw = word.strip()
     if not raw or " " in raw or "-" in raw:
         return raw
@@ -56,6 +56,10 @@ def _lemmatize(word: str) -> str:
         return lower[:-1]
 
     return raw
+
+
+_lemmatize = lemmatize
+
 
 
 PROMPT_TEMPLATE ="""You are a dictionary assistant. Define the following English vocabulary word

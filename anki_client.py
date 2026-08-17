@@ -91,31 +91,57 @@ def _note_field_value(note: dict, field_name: str) -> str:
 
 
 def _iter_deck_notes() -> list[dict]:
-    note_ids = _invoke("findNotes", query=f'deck:"{ANKI_DECK_NAME}"')
+    note_ids = _invoke("findNotes", query=f'note:"{ANKI_MODEL_NAME}"')
+    if not note_ids:
+        note_ids = _invoke("findNotes", query=f'deck:"{ANKI_DECK_NAME}"')
     if not note_ids:
         return []
     return _invoke("notesInfo", notes=note_ids)
+
+
+def _extract_word_and_base(raw_word_field: str) -> tuple[str, str | None]:
+    plain_text = _extract_plain_text(raw_word_field)
+    if "Base word:" in plain_text:
+        parts = plain_text.split("Base word:", 1)
+        word = parts[0].strip()
+        base_word = parts[1].strip()
+        return word, base_word
+    return plain_text.strip(), None
+
+
+def _get_note_match_keys(note: dict) -> set[str]:
+    raw_word_field = _note_field_value(note, "Word")
+    extracted_word, extracted_base = _extract_word_and_base(raw_word_field)
+    keys = {
+        _normalize_key(raw_word_field),
+        _normalize_key(_extract_plain_text(raw_word_field)),
+        _normalize_key(extracted_word),
+    }
+    if extracted_base:
+        keys.add(_normalize_key(extracted_base))
+    keys.discard("")
+    return keys
 
 
 def word_exists_in_deck(word: str, base_word: str | None = None) -> bool:
     """Check if the word already exists in the Anki deck."""
     candidates = [word, base_word]
     seen = set()
-    normalized_candidates = []
+    normalized_candidates = set()
 
     for candidate in candidates:
         candidate = (candidate or "").strip()
         if not candidate or candidate.casefold() in seen:
             continue
         seen.add(candidate.casefold())
-        normalized_candidates.append(_normalize_match_key(candidate))
+        normalized_candidates.add(_normalize_key(candidate))
 
     if not normalized_candidates:
         return False
 
     for note in _iter_deck_notes():
-        note_word = _normalize_match_key(_note_field_value(note, "Word"))
-        if note_word in normalized_candidates:
+        note_keys = _get_note_match_keys(note)
+        if note_keys & normalized_candidates:
             return True
 
     return False
@@ -124,40 +150,37 @@ def word_exists_in_deck(word: str, base_word: str | None = None) -> bool:
 def get_existing_vocab_data(word: str, base_word: str | None = None) -> dict | None:
     candidates = [word, base_word]
     seen = set()
-    normalized_candidates = []
+    normalized_candidates = set()
 
     for candidate in candidates:
         candidate = (candidate or "").strip()
         if not candidate or candidate.casefold() in seen:
             continue
         seen.add(candidate.casefold())
-        normalized_candidates.append(_normalize_match_key(candidate))
+        normalized_candidates.add(_normalize_key(candidate))
 
     if not normalized_candidates:
         return None
 
     for note in _iter_deck_notes():
-        note_word = _normalize_match_key(_note_field_value(note, "Word"))
-        if note_word not in normalized_candidates:
+        note_keys = _get_note_match_keys(note)
+        if not (note_keys & normalized_candidates):
             continue
 
-        plain_word = _extract_plain_text(_note_field_value(note, "Word"))
-        base_word_value = None
-        base_match = re.search(r"Base word:\s*(.+)", plain_word)
-        if base_match:
-            base_word_value = base_match.group(1).strip()
-        elif plain_word:
-            base_word_value = plain_word
+        raw_word_field = _note_field_value(note, "Word")
+        extracted_word, extracted_base = _extract_word_and_base(raw_word_field)
+        audio_val = _note_field_value(note, AUDIO_FIELD_NAME)
 
         return {
-            "word": plain_word or word,
-            "base_word": base_word_value or (base_word or word),
+            "word": extracted_word or word,
+            "base_word": extracted_base or base_word or extracted_word or word,
             "phonetic": _note_field_value(note, "Phonetic"),
             "part_of_speech": _note_field_value(note, "PartOfSpeech"),
             "meaning_vi": _note_field_value(note, "MeaningVi"),
             "meaning_en": _note_field_value(note, "MeaningEn"),
             "example_en": _note_field_value(note, "ExampleEn"),
             "example_vi": _note_field_value(note, "ExampleVi"),
+            "audio": audio_val,
         }
 
     return None

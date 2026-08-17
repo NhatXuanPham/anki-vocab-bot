@@ -14,7 +14,7 @@ from anki_client import (
     find_mp3_for_word,
     get_existing_vocab_data,
 )
-from ai_client import AIExplainError, explain_word
+from ai_client import AIExplainError, explain_word, lemmatize
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -43,17 +43,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def _build_reply(data: dict, audio_media: dict | None = None, title: str = "Card added") -> str:
-    audio_line = (
-        f"\n🔊 Cambridge MP3 attached: {audio_media['filename']}"
-        if audio_media is not None
-        else "\n🔇 No suitable Cambridge MP3 found"
-    )
+def _build_reply(
+    data: dict,
+    audio_media: dict | None = None,
+    title: str = "Card added",
+) -> str:
+    if audio_media is not None:
+        audio_line = f"\n🔊 Cambridge MP3 attached: {audio_media['filename']}"
+    elif data.get("audio"):
+        audio_line = f"\n🔊 Audio: {data['audio']}"
+    else:
+        audio_line = "\n🔇 No suitable Cambridge MP3 found"
+
     base_word_line = ""
     base_word = (data.get("base_word") or "").strip()
     if base_word and base_word.casefold() != data["word"].strip().casefold():
         base_word_line = f"Base word: {base_word}\n"
-
     return (
         f"✅ {title}: {data['word']} {data['phonetic']} ({data['part_of_speech']})\n"
         f"{base_word_line}"
@@ -78,10 +83,14 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text(f"Looking up '{word}'...")
 
     try:
-        existing_data = get_existing_vocab_data(word)
+        lemma = lemmatize(word)
+        existing_data = get_existing_vocab_data(word, base_word=lemma)
         if existing_data is not None:
             await status_msg.edit_text(
-                _build_reply(existing_data, title="Already exists in Anki")
+                _build_reply(
+                    existing_data,
+                    title="Already in Anki",
+                )
             )
             return
 
@@ -95,6 +104,24 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         add_vocab_note(data, audio_media=audio_media)
     except AnkiConnectError as e:
+        if "duplicate" in str(e).lower():
+            existing_data = get_existing_vocab_data(word, base_word=data.get("base_word"))
+            if existing_data is not None:
+                await status_msg.edit_text(
+                    _build_reply(
+                        existing_data,
+                        title="Already in Anki",
+                    )
+                )
+                return
+            await status_msg.edit_text(
+                _build_reply(
+                    data,
+                    audio_media=audio_media,
+                    title="Already in Anki",
+                )
+            )
+            return
         await status_msg.edit_text(f"Meaning retrieved, but failed to add to Anki: {e}")
         return
 
