@@ -1,9 +1,3 @@
-"""
-Telegram bot: nhận 1 từ vựng -> gọi AI giải nghĩa -> tạo thẻ trong Anki
-(qua AnkiConnect, Anki phải đang mở trên máy chạy bot này).
-
-Chạy: python bot.py
-"""
 import logging
 import os
 
@@ -43,16 +37,17 @@ def _is_allowed(user_id: int) -> bool:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Gửi cho tôi 1 từ tiếng Anh, tôi sẽ giải nghĩa bằng AI, lấy MP3 từ "
-        "Cambridge nếu có, rồi tự tạo thẻ Anki cho bạn (nhớ mở sẵn Anki trên máy nhé)."
+        "Send me an English word, and I will explain its meaning using AI, retrieve audio "
+        "from Cambridge if available, and automatically create an Anki card for you "
+        "(make sure Anki is running on your machine)."
     )
 
 
-def _build_reply(data: dict, audio_media: dict | None = None, title: str = "Đã thêm thẻ") -> str:
+def _build_reply(data: dict, audio_media: dict | None = None, title: str = "Card added") -> str:
     audio_line = (
-        f"\n🔊 Đã đính kèm MP3 Cambridge: {audio_media['filename']}"
+        f"\n🔊 Cambridge MP3 attached: {audio_media['filename']}"
         if audio_media is not None
-        else "\n🔇 Không tìm thấy MP3 Cambridge phù hợp"
+        else "\n🔇 No suitable Cambridge MP3 found"
     )
     base_word_line = ""
     base_word = (data.get("base_word") or "").strip()
@@ -73,26 +68,26 @@ def _build_reply(data: dict, audio_media: dict | None = None, title: str = "Đã
 async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not _is_allowed(user_id):
-        await update.message.reply_text("Bạn không có quyền dùng bot này.")
+        await update.message.reply_text("You are not authorized to use this bot.")
         return
 
     word = update.message.text.strip()
     if not word:
         return
 
-    status_msg = await update.message.reply_text(f"Đang tra '{word}'...")
+    status_msg = await update.message.reply_text(f"Looking up '{word}'...")
 
     try:
         existing_data = get_existing_vocab_data(word)
         if existing_data is not None:
             await status_msg.edit_text(
-                _build_reply(existing_data, title="Đã có sẵn trong Anki")
+                _build_reply(existing_data, title="Already exists in Anki")
             )
             return
 
         data = explain_word(word)
     except AIExplainError as e:
-        await status_msg.edit_text(f"Lỗi khi giải nghĩa: {e}")
+        await status_msg.edit_text(f"Error explaining word: {e}")
         return
 
     audio_media = find_mp3_for_word(word, data.get("base_word"))
@@ -100,30 +95,30 @@ async def handle_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         add_vocab_note(data, audio_media=audio_media)
     except AnkiConnectError as e:
-        await status_msg.edit_text(f"Lấy nghĩa xong nhưng lỗi khi thêm vào Anki: {e}")
+        await status_msg.edit_text(f"Meaning retrieved, but failed to add to Anki: {e}")
         return
 
-    await status_msg.edit_text(_build_reply(data, audio_media=audio_media, title="Đã thêm thẻ"))
+    await status_msg.edit_text(_build_reply(data, audio_media=audio_media, title="Card added"))
 
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
-        raise SystemExit("Thiếu TELEGRAM_BOT_TOKEN trong file .env")
+        raise SystemExit("Missing TELEGRAM_BOT_TOKEN in .env file")
 
     try:
         ensure_deck_and_model_exist()
-        logger.info("Đã kiểm tra/tạo deck và note type trong Anki.")
+        logger.info("Checked/created deck and note type in Anki.")
     except AnkiConnectError as e:
         raise SystemExit(
-            f"Không kết nối được Anki lúc khởi động: {e}\n"
-            "Hãy mở Anki (có cài addon AnkiConnect) rồi chạy lại bot."
+            f"Could not connect to Anki on startup: {e}\n"
+            "Please open Anki (with the AnkiConnect add-on installed) and restart the bot."
         )
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_word))
 
-    logger.info("Bot đang chạy...")
+    logger.info("Bot is running...")
     app.run_polling()
 
 

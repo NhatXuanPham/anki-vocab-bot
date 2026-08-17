@@ -1,25 +1,29 @@
-# Anki Vocab Bot (Telegram + Groq + AnkiConnect)
+# Anki Vocab Bot (Telegram + OpenAI-compatible LLM + AnkiConnect)
 
-Bot Telegram: bạn gửi 1 từ tiếng Anh → bot gọi Groq API giải nghĩa,
-lấy MP3 từ trang Cambridge nếu có → tự động tạo thẻ trong Anki (qua addon
-AnkiConnect, cần Anki đang mở trên cùng máy chạy bot).
+Telegram Bot: Send an English word → the bot calls an OpenAI-compatible LLM API to get definitions, retrieves MP3 audio from Cambridge Dictionary if available, and automatically creates a card in Anki (via the AnkiConnect add-on; Anki must be running on the same machine as the bot).
 
-## 1. Chuẩn bị
+## 1. Prerequisites
 
-### a) Cài AnkiConnect trong Anki
-1. Mở Anki → **Tools → Add-ons → Get Add-ons...**
-2. Nhập code: `2055492159`
-3. Restart Anki. Từ giờ khi Anki mở, nó tự chạy 1 server local ở
-   `http://127.0.0.1:8765`.
+### a) Install AnkiConnect in Anki
 
-### b) Lấy Telegram Bot Token
-- Chat với [@BotFather](https://t.me/BotFather) trên Telegram → `/newbot`
-  → làm theo hướng dẫn → copy token dạng `123456:ABC-DEF...`.
+1. Open Anki → **Tools → Add-ons → Get Add-ons...**
+2. Enter code: `2055492159`
+3. Restart Anki. AnkiConnect will now run a local server at `[http://127.0.0.1:8765](http://127.0.0.1:8765)` whenever Anki is open.
 
-### c) Lấy Groq API Key
-- Vào https://console.groq.com/keys → tạo API key.
+### b) Get a Telegram Bot Token
 
-## 2. Cài đặt
+* Chat with [@BotFather](https://t.me/BotFather) on Telegram → `/newbot` → follow instructions → copy the token (e.g., `123456:ABC-DEF...`).
+
+### c) Prepare the API (OpenAI-compatible)
+
+You can use any provider:
+
+* **LiteLLM Proxy** (localhost): Run a LiteLLM proxy locally.
+* **OpenAI API**: Configure the official OpenAI endpoint.
+* **Ollama**: Run a local LLM model.
+* **Groq API**: Use the Groq endpoint.
+
+## 2. Installation
 
 ```bash
 cd anki_bot
@@ -27,62 +31,48 @@ python -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env
-# rồi mở .env, điền TELEGRAM_BOT_TOKEN và GROQ_API_KEY
+cp env.example .env
+# Open .env and fill in TELEGRAM_BOT_TOKEN, AI_API_URL, AI_MODEL, AI_API_KEY
+
 ```
 
-## 3. Chạy
+## 3. Usage
 
-1. **Mở Anki trước** (để AnkiConnect server sống).
-2. Chạy bot:
-   ```bash
-   python bot.py
-   ```
-3. Trên Telegram, mở chat với bot bạn vừa tạo → gõ `/start` → gửi thử
-   1 từ, ví dụ: `serendipity`.
+1. **Open Anki first** (to ensure the AnkiConnect server is running).
+2. **Start the LLM API server** (if using a local setup):
+3. Run the bot:
+```bash
+python bot.py
 
-Bot sẽ tự tạo deck (`Vocab AI` theo mặc định) và note type (`Vocab (AI)`)
-trong Anki nếu chưa có, với các field: Word, Phonetic, PartOfSpeech,
-MeaningVi, MeaningEn, ExampleEn, ExampleVi, Audio. Field `Word` sẽ tự
-gộp luôn base word khi có, nên không cần field riêng cho BaseWord.
+```
 
-## 4. Tuỳ chỉnh
 
-- **Đổi tên deck/note type**: sửa `ANKI_DECK_NAME`, `ANKI_MODEL_NAME` trong `.env`.
-- **Đổi model Groq**: sửa `GROQ_MODEL` trong `.env` (ví dụ
-  `llama-3.3-70b-versatile`).
-- **Schema tối giản**: bot luôn lưu nguyên từ người dùng nhập ở field `Word`,
-  và nếu có base word thì nó được gộp ngay trong field `Word` luôn. Các field
-  khác giữ như đề xuất của bạn: `Phonetic`, `PartOfSpeech`, `MeaningVi`,
-  `MeaningEn`, `ExampleEn`, `ExampleVi`, `Audio`.
-- **Audio Cambridge**: bot sẽ tự mở trang
-  `https://dictionary.cambridge.org/vi/dictionary/english/<tu-vung>` để lấy
-  file `.mp3` phát âm và đính kèm vào field `Audio` trong Anki. Khi từ là dạng
-  biến đổi, bot sẽ ưu tiên tra audio theo `BaseWord` nhưng vẫn giữ `Word`
-  gốc người dùng đã gửi.
-- **Giới hạn ai được dùng bot**: điền Telegram user ID (không phải username)
-  vào `ALLOWED_TELEGRAM_USER_IDS` trong `.env`, cách nhau dấu phẩy. Lấy user
-  ID bằng cách chat với bot @userinfobot.
-- **Sửa layout thẻ / thêm field** (ví dụ: thêm ảnh minh hoạ, âm thanh phát
-  âm): sửa `FIELDS`, `FRONT_TEMPLATE`, `BACK_TEMPLATE` trong `anki_client.py`
-  — lưu ý nếu note type đã tồn tại trong Anki rồi thì sửa code sẽ không tự
-  cập nhật lại note type cũ, cần xoá note type đó trong Anki để bot tạo lại,
-  hoặc tự sửa tay trong Anki.
+4. Open a chat with your newly created bot on Telegram → send `/start` → test with a word, e.g., `serendipity`.
 
-## 5. Chạy nền lâu dài (tuỳ chọn)
+The bot will automatically create a deck (`Vocab AI` by default) and a note type (`Vocab (AI)`) in Anki if they do not exist yet, using the following fields: `Word`, `Phonetic`, `PartOfSpeech`, `MeaningVi`, `MeaningEn`, `ExampleEn`, `ExampleVi`, `Audio`. The `Word` field automatically includes the base word when applicable, so a separate field for `BaseWord` is not required.
 
-Nếu muốn bot chạy nền, có thể dùng `pm2`, `systemd` (Linux), hoặc Task
-Scheduler (Windows) để tự khởi động `python bot.py` cùng máy. Vì bot cần
-Anki đang mở, cách này chỉ hợp lý nếu máy bạn luôn bật Anki sẵn.
+## 4. Customization
 
-## Cấu trúc project
+* **Change deck/note type name**: Modify `ANKI_DECK_NAME` and `ANKI_MODEL_NAME` in `.env`.
+* **Change Groq model**: Modify `GROQ_MODEL` in `.env` (e.g., `llama-3.3-70b-versatile`).
+* **Minimalist schema**: The bot saves the exact user input in the `Word` field, merging the base word directly into it if available. Other fields remain as configured: `Phonetic`, `PartOfSpeech`, `MeaningVi`, `MeaningEn`, `ExampleEn`, `ExampleVi`, `Audio`.
+* **Cambridge Audio**: The bot opens `[https://dictionary.cambridge.org/vi/dictionary/english/](https://dictionary.cambridge.org/vi/dictionary/english/)<word>` to fetch the `.mp3` pronunciation file and attaches it to the `Audio` field in Anki. For inflected word forms, it prioritizes searching audio via the `BaseWord` while preserving the user's original `Word` entry.
+* **Restrict access**: Add Telegram User IDs (not usernames) to `ALLOWED_TELEGRAM_USER_IDS` in `.env`, separated by commas. Obtain your user ID by chatting with [@userinfobot](https://t.me/userinfobot).
+* **Customize card layout / Add fields** (e.g., adding images or extra audio): Modify `FIELDS`, `FRONT_TEMPLATE`, and `BACK_TEMPLATE` in `anki_client.py`. Note that updating code will not automatically modify existing note types in Anki; you must delete the existing note type in Anki for the bot to recreate it, or edit it manually in Anki.
+
+## 5. Running in the Background (Optional)
+
+To keep the bot running continuously, use `pm2`, `systemd` (Linux), or Task Scheduler (Windows) to autostart `python bot.py`. Since the bot requires Anki to be open, this approach is recommended if Anki remains running on your system.
+
+## Project Structure
 
 ```
 anki_bot/
-├── bot.py             # entrypoint, xử lý Telegram
-├── ai_client.py   # gọi AI API, parse JSON nghĩa từ
-├── anki_client.py     # gọi AnkiConnect, tạo deck/note type/thẻ
+├── bot.py             # Entrypoint, handles Telegram interaction
+├── ai_client.py       # Calls AI API, parses word definitions (JSON)
+├── anki_client.py     # Calls AnkiConnect, creates deck/note type/cards
 ├── requirements.txt
 ├── .env.example
 └── README.md
+
 ```

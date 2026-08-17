@@ -1,7 +1,3 @@
-"""
-Giao tiếp với Anki qua addon AnkiConnect (https://ankiweb.net/shared/info/2055492159).
-Yêu cầu: Anki phải đang MỞ trên máy này, và đã cài addon AnkiConnect.
-"""
 import base64
 import html
 import os
@@ -102,7 +98,7 @@ def _iter_deck_notes() -> list[dict]:
 
 
 def word_exists_in_deck(word: str, base_word: str | None = None) -> bool:
-    """Kiểm tra từ đã tồn tại trong deck Anki chưa."""
+    """Check if the word already exists in the Anki deck."""
     candidates = [word, base_word]
     seen = set()
     normalized_candidates = []
@@ -126,7 +122,6 @@ def word_exists_in_deck(word: str, base_word: str | None = None) -> bool:
 
 
 def get_existing_vocab_data(word: str, base_word: str | None = None) -> dict | None:
-    """Lấy dữ liệu thẻ đã tồn tại từ Anki để hiển thị lại cho người dùng."""
     candidates = [word, base_word]
     seen = set()
     normalized_candidates = []
@@ -220,7 +215,6 @@ def _fetch_cambridge_mp3(word: str) -> dict | None:
 
 
 def find_mp3_for_word(word: str, base_word: str | None = None) -> dict | None:
-    """Lấy mp3 pronunciation từ trang Cambridge, ưu tiên từ người dùng nhập."""
     candidates = [word, base_word]
     seen = set()
 
@@ -244,19 +238,18 @@ def _invoke(action: str, **params):
         resp.raise_for_status()
     except requests.RequestException as e:
         raise AnkiConnectError(
-            "Không kết nối được tới AnkiConnect. Kiểm tra: "
-            "1) Anki đang mở, 2) đã cài addon AnkiConnect, "
-            f"3) URL đúng ({ANKI_CONNECT_URL}). Lỗi gốc: {e}"
+            "Could not connect to AnkiConnect. Check: "
+            "1) Anki is open, 2) AnkiConnect add-on is installed, "
+            f"3) URL is correct ({ANKI_CONNECT_URL}). Original error: {e}"
         ) from e
 
     result = resp.json()
     if result.get("error") is not None:
-        raise AnkiConnectError(f"AnkiConnect trả lỗi: {result['error']}")
+        raise AnkiConnectError(f"AnkiConnect returned an error: {result['error']}")
     return result["result"]
 
 
 def ensure_deck_and_model_exist():
-    """Tạo deck và note type nếu chưa tồn tại. Gọi 1 lần lúc bot khởi động."""
     decks = _invoke("deckNames")
     if ANKI_DECK_NAME not in decks:
         _invoke("createDeck", deck=ANKI_DECK_NAME)
@@ -309,10 +302,6 @@ def ensure_deck_and_model_exist():
 
 
 def add_vocab_note(data: dict, tags=None, audio_media: dict | None = None) -> int:
-    """
-    Thêm 1 note vào Anki từ dict trả về bởi ai_client.explain_word().
-    Trả về note ID nếu thành công.
-    """
     note = {
         "deckName": ANKI_DECK_NAME,
         "modelName": ANKI_MODEL_NAME,
@@ -341,6 +330,6 @@ def add_vocab_note(data: dict, tags=None, audio_media: dict | None = None) -> in
     note_id = _invoke("addNote", note=note)
     if note_id is None:
         raise AnkiConnectError(
-            f"Thẻ '{data['word']}' có thể đã tồn tại trong deck (bị chặn trùng lặp)."
+            f"Card '{data['word']}' may already exist in the deck (duplicate prevented)."
         )
     return note_id
